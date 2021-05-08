@@ -1,0 +1,139 @@
+#include <linux/module.h>
+
+#include <linux/fs.h>
+#include <linux/errno.h>
+#include <linux/miscdevice.h>
+#include <linux/kernel.h>
+#include <linux/major.h>
+#include <linux/mutex.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/stat.h>
+#include <linux/init.h>
+#include <linux/device.h>
+#include <linux/tty.h>
+#include <linux/kmod.h>
+#include <linux/gfp.h>
+
+#include "led_opr.h"
+
+
+//① 确定主设备号，也可以让内核分配 
+static int major  =0;
+static struct class *led_class;
+struct led_operations *p_led_opr;
+
+
+
+#define MIN(a,b) (a<b?a:b)
+#define LED_NUM 2
+
+//③ 实现对应的 drv_open/drv_read/drv_write 等函数，填入 file_operations 结构体 
+static ssize_t led_drv_read (struct file *file,char __user *buf, size_t size, loff_t *offset)
+{
+	printk("%s %s line %d\n",__FILE__,__FUNCTION__,__LINE__);
+	return 0;
+}
+
+static ssize_t led_drv_write (struct file *file,const char __user *buf, size_t size, loff_t *offset)
+{
+	int err; 
+	char status;
+	struct inode *inode = file_inode(file);
+	int minor = iminor(inode);
+	
+	printk("%s %s line %d\n",__FILE__,__FUNCTION__,__LINE__);
+	err=copy_from_user(&status,buf ,1);
+	
+	/*根据次设备号和status控制led*/
+	p_led_opr->ctl(minor, status);
+	
+	return 1;
+}
+
+static int led_drv_open (struct inode *node, struct file *file)
+{
+	int minor = iminor(node) ;
+	
+	printk("%s %s line %d\n",__FILE__,__FUNCTION__,__LINE__);
+	/*根据次设备号和status控制led*/
+	p_led_opr->init(minor);  //minor为次设备号
+
+	return 0;
+}
+
+static int led_drv_close (struct inode *node, struct file *file)
+{
+	printk("%s %s line %d\n",__FILE__,__FUNCTION__,__LINE__);
+	return 0;
+}
+
+
+//② 定义自己的 file_operations 结构体 
+static struct file_operations led_drv ={
+	.owner		= THIS_MODULE,
+	.open	=led_drv_open,
+	.read	=led_drv_read,
+	.write	=led_drv_write,
+	.release =led_drv_close,
+		
+};
+
+
+
+
+
+
+//④ 把 file_operations 结构体告诉内核：register_chrdev 
+//⑤ 谁来注册驱动程序啊？得有一个入口函数：安装驱动程序时，就会去调用这个入口函数 
+static int __init led_init(void)
+{
+	int err;
+	int i ;
+	major=register_chrdev(0,"Lin_led",&led_drv);
+
+	led_class = class_create(THIS_MODULE, "Lin_led_class");
+	err = PTR_ERR(led_class);
+	if (IS_ERR(led_class))
+	{
+		unregister_chrdev(major,"Lin_led");//device_create
+		return -1;
+	}
+
+	p_led_opr =  get_board_led_opr();
+	
+	for(i=0;i<p_led_opr->num;i++)
+		{
+			device_create(led_class,NULL,MKDEV(major, i),NULL,"Lin_led%d",i);  /*/dev/Lin_led*/
+		}
+
+	
+	
+	return 0;
+}
+
+//⑥ 有入口函数就应该有出口函数：卸载驱动程序时，出口函数调用 unregister_chrdev 
+static void __init led_exit(void)
+{
+
+	
+	int i; 
+	for(i=0;i<p_led_opr->num;i++)
+		device_destroy(led_class, MKDEV(major, i));
+		
+	device_destroy(led_class, MKDEV(major, 0));
+	class_destroy(led_class);
+	unregister_chrdev(major,"Lin_led");
+	return;
+}
+
+
+//⑦ 其他完善：提供设备信息，自动创建设备节点：class_create, device_create
+module_init(led_init);
+module_exit(led_exit);
+
+
+MODULE_LICENSE("GPL");
+
+
+
