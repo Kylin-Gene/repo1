@@ -181,6 +181,8 @@ int const function7();	//返回一个常指针，使用:int* const p = function7
 
  **a[i]==i[a]==\*(i+a)==\*(a+i)**
 
+这个汇编是怎样的形式？
+
 
 
 ### 指针与引用
